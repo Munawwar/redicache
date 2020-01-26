@@ -1,0 +1,27 @@
+{
+  "name": "redicache",
+  "version": "0.1.0",
+  "description": "Two level caching strategy - Redis + Local (in process memory) - for node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Munawwar/redicache.git"
+  },
+  "keywords": [
+    "redis",
+    "cache"
+  ],
+  "author": "Munawwar",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Munawwar/redicache/issues"
+  },
+  "homepage": "https://github.com/Munawwar/redicache#readme",
+  "dependencies": {
+    "bluebird": "^3.7.2",
+    "redlock": "^4.1.0"
+  }
+}
