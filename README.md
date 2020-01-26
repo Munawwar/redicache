@@ -5,6 +5,8 @@ Caching works across any number of node.js processes regardless of architecture 
 
 (Why "redicache"? It sounds like "ready cache".. doesn't it? 🤷‍♂️)
 
+Note: If you are using redis 2.x use version 2.8+, as there are issues with TTL command in lower versions.
+
 ## Usage
 
 ```js
