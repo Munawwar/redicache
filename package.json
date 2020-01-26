@@ -1,7 +1,7 @@
 {
   "name": "redicache",
-  "version": "0.1.0",
-  "description": "Two level caching strategy - Redis + Local (in process memory) - for node.js",
+  "version": "0.1.1",
+  "description": "Work in progress - Two level caching strategy - Redis + Local (in process memory) - for node.js",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
