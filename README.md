@@ -1,5 +1,5 @@
 # redicache
-Two level caching strategy - Redis + Local (in process memory) - for node.js
+Work in progress - Two level caching strategy - Redis + Local (in process memory) - for node.js
 
 Caching works across any number of node.js processes regardless of architecture as long as they can connect to a common redis cluster (library uses redis pubsub and redlock).
 
