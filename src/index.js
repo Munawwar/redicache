@@ -59,8 +59,9 @@ function unlock(lock, lockKey) {
 // FIXME: currently if redis is down, each process will call fetchLatestValue()
 // independently and parellely and could be prohibitively expensive.
 // In those cases, maybe returning the old cache value and serving potentially stale
-// value is better. Therefore in future, give a config option per cache key, to
-// define the behavior. i.e. 2 modes of availability.
+// value is better.
+// Or alternatively use a 3rd data store to mock the data or fetch stale data
+// - like a filesystem with stored mock/stale data. hmmmm....
 async function redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec) {
   let latestValue;
   try {
@@ -197,7 +198,9 @@ async function attemptCacheRegeneration(
   try {
     lock = await tryOnceLock.lock(lockKey, CACHE_LOCK_TTL);
   } catch (err) {
-    // FIXME: need to differentiate redis down vs already locked
+    // either cache key is already locked or redis is down
+    // in either case, attemptCacheRegeneration() doesn't promise a retry..
+    // only promises a single attempt.
     return new Error(
       `Could not acquire cache lock for regeneration for lock key ${lockKey}. `
       + `Maybe another process has acquired lock or redis is down? : ${err.message}`,
