@@ -37,6 +37,8 @@ const valueOrError = await redicache.getOrInitCache(
   fetchHomePage,
   cacheExpiryTimeInSeconds,
 );
+// you can differentiate error from value using an instanceof check.
+// if (valueOrError instanceof Error) { /* ... */ }
 
 // if you cache for unlimited duration of time, you need a way to refresh
 // it by API (without causing home page downtime)
