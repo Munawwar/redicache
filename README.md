@@ -56,8 +56,12 @@ const newValueOrError = await redicache.attemptCacheRegeneration(
 
 ## Limitations
 
-1. Redis (and redlock) doesn't have fencing tokens. So potentially an older values can overwrite remote cache if write-lock expires while computing the new value to be saved. If that is a problem for your use-case then don't use this lib (and redis for locks). The approach isn't bullet-proof, but is of best effort. In many cases, this is an acceptable trade-off.
+1. Redis (and redlock) doesn't have fencing tokens. So potentially a process can overwrite the remote cache with an older value if write-lock expires while computing the new value to be saved. If that is a problem for your use-case then don't use this lib (and redis for locks). The approach isn't bullet-proof, but is of best effort. In many cases, this is an acceptable trade-off.
 
-2. Currently if redis is detected to be down, then library will fetch latest value and save in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior.
+2. Currently if redis is detected to be down, then library will fetch latest value and save in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
 
-3. Library makes some sane assumptions like, assuming system clock always moves forward. So if your host system clock is reset back by time, then expect the most unexpected things to happen.
+3. Local cache will return objects/arrays as is - without cloning. If your code mutates the object/array, it mutates it for the entire process. This isn't a good thing for many web apps. In future, I might change it to always send back clone of object on local cache hit.
+
+4. There is no memory cap/max limit for local cache. Not a limitation, but something to be aware of.
+
+5. Library makes some sane assumptions like, assuming system clock always moves forward. So if your host system clock is reset back by time, then expect the most unexpected things to happen.

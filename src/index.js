@@ -1,9 +1,14 @@
+/* eslint-disable no-console */
+
 // 2 level cacher
 // Level 1 - in process memory
 // Level 2 - redis
 
 const Redlock = require('redlock');
 const bluebird = require('bluebird');
+
+const localCache = require('./localCache');
+const remoteCache = require('./remoteCache');
 
 // the default expiry time if expiry is not specified.
 const defaultExpiryInSec = 60 * 60; // 1 hour
@@ -17,105 +22,14 @@ let redisClient;
 let retryForeverLock;
 let tryOnceLock;
 
-const inMemCache = {};
-function fetchFromLocalCache(cacheKey) {
-  return (inMemCache[cacheKey] || {}).value;
-}
-function saveToLocalCache(cacheKey, value, expiryTimeInSec) {
-  if (value === undefined) {
-    console.warn('Cannot save undefined value to local cache for key', cacheKey);
-    return false;
-  }
-  if (expiryTimeInSec === undefined) {
-    console.warn('Cannot save undefined expiry time to local cache for key', cacheKey);
-    return false;
-  }
-  if (expiryTimeInSec < 0) {
-    console.warn('Expiry time cannot be negative for local cache key', cacheKey);
-    return false;
-  }
-  clearTimeout((inMemCache[cacheKey] || {}).timer);
-  inMemCache[cacheKey] = {
-    value,
-    timer: expiryTimeInSec !== Infinity
-      ? setTimeout(() => {
-        delete inMemCache[cacheKey];
-      }, expiryTimeInSec * 1000)
-      : null,
-  };
-  return true;
-}
-
-async function fetchFromRemoteCache(cacheKey) {
-  let val;
-  try {
-    val = redisClient.getAsync(cacheKey);
-  } catch (err) {
-    console.warn('Error while fetching value from remote cache, for key', cacheKey, ':', err.message);
-  }
-  if (typeof val === 'string') {
-    try {
-      return JSON.parse(val);
-    } catch (err) {
-      console.warn('Could not JSON parse the remote cached value for key', cacheKey, ':', err.message);
-    }
-  }
-  return undefined;
-}
-async function fetchTTLFromRemoteCache(cacheKey) {
-  let val;
-  try {
-    val = redisClient.ttlAsync(cacheKey);
-  } catch (err) {
-    console.warn('Error while fetching value from remote cache, for key', cacheKey, ':', err.message);
-  }
-  if (val === -1) {
-    return Infinity;
-  }
-  if (val > 0) {
-    return val;
-  }
-  // if val -2, then key doesn't exists
-  return undefined;
-}
-
-async function saveToRemoteCache(cacheKey, value, expiryTimeInSec) {
-  if (value === undefined) {
-    console.warn('Cannot save undefined value to remote cache for key', cacheKey);
-    return false;
-  }
-  if (expiryTimeInSec === undefined) {
-    console.warn('Cannot save undefined expiry time to remote cache for key', cacheKey);
-    return false;
-  }
-  if (expiryTimeInSec < 0) {
-    console.warn('Expiry time cannot be negative for local cache key', cacheKey);
-    return false;
-  }
-  try {
-    let ttlParams = [];
-    if (expiryTimeInSec !== Infinity) {
-      ttlParams = ['EX', expiryTimeInSec];
-    }
-    return redisClient.setAsync(
-      cacheKey,
-      JSON.stringify(value),
-      ...ttlParams,
-    );
-  } catch (err) {
-    console.warn('Could not save to remote cache for key', cacheKey, ':', err.message);
-    return false;
-  }
-}
-
 async function refreshLocalCacheFromRemoteCache(cacheKey) {
   // if not found, check in remote cache
   const [val, ttlInSec] = await Promise.all([
-    fetchFromRemoteCache(cacheKey),
-    fetchTTLFromRemoteCache(cacheKey),
+    remoteCache.fetch(cacheKey),
+    remoteCache.fetchTTL(cacheKey),
   ]);
   if (val !== undefined && ttlInSec) {
-    saveToLocalCache(cacheKey, val, ttlInSec);
+    localCache.save(cacheKey, val, ttlInSec);
     return val;
   }
   return undefined;
@@ -135,11 +49,11 @@ function signalOthersProcessesToRefreshLocalCache(cacheKey) {
   );
 }
 
-const getLockKey = cacheKey => `cachelock::${cacheKey}`;
+const getLockKey = (cacheKey) => `cachelock::${cacheKey}`;
 
 function unlock(lock, lockKey) {
   return lock.unlock()
-    .catch(err => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
+    .catch((err) => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
 }
 
 // FIXME: currently if redis is down, each process will call fetchLatestValue()
@@ -155,7 +69,7 @@ async function redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec) {
     console.warn('getOrInitCache: could not compute latest cache value for', cacheKey, ':', err.message);
   }
   if (latestValue !== undefined) {
-    saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
+    localCache.save(cacheKey, latestValue, expiryTimeInSec);
   }
   return latestValue;
 }
@@ -173,7 +87,7 @@ async function getOrInitCache(
     return new Error('cache library not initialized. you need to first call init() method with redisClient as parameter');
   }
   // first check in local cache
-  let val = fetchFromLocalCache(cacheKey);
+  let val = localCache.fetch(cacheKey);
   if (val !== undefined) {
     return val;
   }
@@ -243,10 +157,10 @@ async function getOrInitCache(
   }
 
   if (latestValue !== undefined) {
-    saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
+    localCache.save(cacheKey, latestValue, expiryTimeInSec);
     // asyncly save to remote cache and release lock in normal cases. don't await
     (async () => {
-      const result = await saveToRemoteCache(cacheKey, latestValue, expiryTimeInSec);
+      const result = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
       // if lock potentially expired before the write..
       if (result !== false && estimatedLockExpiryTime <= Date.now()) {
         // .. well I have potentially overwritten the remote cache anyway,
@@ -318,9 +232,9 @@ async function attemptCacheRegeneration(
   if (!error) {
     if (latestValue !== undefined) {
       // when forcing regeneration, wait for save and unlock and then return.
-      const res = await saveToRemoteCache(cacheKey, latestValue, expiryTimeInSec);
+      const res = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
       if (res !== false) {
-        saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
+        localCache.save(cacheKey, latestValue, expiryTimeInSec);
         signalOthersProcessesToRefreshLocalCache(cacheKey);
       } else {
         error = new Error('Could not save value to remote cache. So not going to save to local cache either');
@@ -355,6 +269,7 @@ exportObject.init = function init(_redisClient) {
     return new Error('Cannot initialize twice.');
   }
   redisClient = _redisClient;
+  remoteCache.init(redisClient);
   bluebird.promisifyAll(Object.getPrototypeOf(redisClient));
 
   retryForeverLock = new Redlock(

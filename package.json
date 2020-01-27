@@ -2,7 +2,7 @@
   "name": "redicache",
   "version": "0.2.0",
   "description": "Work in progress - Two level caching strategy - Redis + Local (in process memory) - for node.js",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -23,5 +23,10 @@
   "dependencies": {
     "bluebird": "^3.7.2",
     "redlock": "^4.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^6.8.0",
+    "eslint-config-airbnb-base": "^14.0.0",
+    "eslint-plugin-import": "^2.20.0"
   }
 }
