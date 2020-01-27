@@ -60,8 +60,6 @@ const newValueOrError = await redicache.attemptCacheRegeneration(
 
 2. Currently if redis is detected to be down, then library will fetch latest value and save in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
 
-3. Local cache will return objects/arrays as is - without cloning. If your code mutates the object/array, it mutates it for the entire process. This isn't a good thing for many web apps. In future, I might change it to always send back clone of object on local cache hit.
+3. There is no memory cap/max limit for local cache. Not exactly a limitation, but something to be aware of.
 
-4. There is no memory cap/max limit for local cache. Not a limitation, but something to be aware of.
-
-5. Library makes some sane assumptions like, assuming system clock always moves forward. So if your host system clock is reset back by time, then expect the most unexpected things to happen.
+4. Library makes some sane assumptions like, assuming system clock always moves forward. So if your host system clock is reset back by time, then expect the most unexpected things to happen.

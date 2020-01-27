@@ -22,6 +22,7 @@
   "homepage": "https://github.com/Munawwar/redicache#readme",
   "dependencies": {
     "bluebird": "^3.7.2",
+    "clone-deep": "^4.0.1",
     "redlock": "^4.1.0"
   },
   "devDependencies": {

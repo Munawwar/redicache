@@ -1,8 +1,14 @@
 /* eslint-disable no-console */
+const cloneDeep = require('clone-deep');
+
 const inMemCache = {};
 
 function fetchFromLocalCache(cacheKey) {
-  return (inMemCache[cacheKey] || {}).value;
+  const val = (inMemCache[cacheKey] || {}).value;
+  if (val && typeof val === 'object') {
+    return cloneDeep(val);
+  }
+  return val;
 }
 
 function saveToLocalCache(cacheKey, value, expiryTimeInSec) {
