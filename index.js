@@ -142,17 +142,17 @@ function unlock(lock, lockKey) {
     .catch(err => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
 }
 
-// TODO: currently if redis is down, each process will call fetchLatestValue()
+// FIXME: currently if redis is down, each process will call fetchLatestValue()
 // independently and parellely and could be prohibitively expensive.
-// In some cases, holding the old cache value and serving potentially stale value is better.
-// Therefore in future, give a config option per cache key, to define the behavior
-// i.e. 2 modes of availability.
+// In those cases, maybe returning the old cache value and serving potentially stale
+// value is better. Therefore in future, give a config option per cache key, to
+// define the behavior. i.e. 2 modes of availability.
 async function redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec) {
   let latestValue;
   try {
     latestValue = await fetchLatestValue();
   } catch (err) {
-    console.warn('could not compute latest cache value for', cacheKey, ':', err.message);
+    console.warn('getOrInitCache: could not compute latest cache value for', cacheKey, ':', err.message);
   }
   if (latestValue !== undefined) {
     saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
@@ -186,12 +186,14 @@ async function getOrInitCache(
 
   // if not, then get acquire lock preparing for case where
   // cache value needs to be saved remotely
+  // this is to prevent multiple processes from trying to
+  // re-compute potentially expensive fetch func.
   const lockKey = getLockKey(cacheKey);
   let lock;
   try {
     lock = await retryForeverLock.lock(lockKey, CACHE_LOCK_TTL);
   } catch (err) {
-    console.warn('Could not acquire cache lock for key', `${cacheKey}. Is redis down? :`, err.message);
+    console.warn('getOrInitCache: Could not acquire cache lock for key', `${cacheKey}. Is redis down? :`, err.message);
     // redis is down.. so fall back to local cache only
     return redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec);
   }
@@ -200,12 +202,24 @@ async function getOrInitCache(
   // lock and unlock code block takes too long.
   // keep track of lastExtendedTime, since JS setInterval may not run
   // exactly at the set time due to other blocking scripts or GC pause etc.
+  //
+  // Inspite of this lock extension strategy, lock extension itself can fail.
+  // what happens if lock extension fails? I overwrite the cache anyway,
+  // since the point of the lock was to avoid multiple calls to fetchLatestValue()
+  // (which could be very expensive)
   let lastExendedTime = Date.now();
+  let estimatedLockExpiryTime = lastExendedTime + CACHE_LOCK_TTL;
   const lockExtensionTimer = setInterval(async () => {
     const now = Date.now();
     const timeElapsed = now - lastExendedTime;
-    lock = await lock.extend(timeElapsed);
-    lastExendedTime = now;
+    try {
+      estimatedLockExpiryTime += timeElapsed; // lock extension might take time, so increment first
+      lock = await lock.extend(timeElapsed);
+      lastExendedTime = now;
+    } catch (err) {
+      estimatedLockExpiryTime -= timeElapsed;
+      console.warn('getOrInitCache: Lock couldn\'t be extended for key', cacheKey, ':', err.message);
+    }
   }, CACHE_LOCK_EXTENSION_TTL);
 
   // it is possible that this one process has been waiting very long to acquire
@@ -225,16 +239,26 @@ async function getOrInitCache(
     latestValue = await fetchLatestValue();
   } catch (err) {
     error = true;
-    console.warn('could not compute latest cache value for key', cacheKey, ':', err.message);
+    console.warn('getOrInitCache: could not compute latest cache value for key', cacheKey, ':', err.message);
   }
 
   if (latestValue !== undefined) {
     saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
     // asyncly save to remote cache and release lock in normal cases. don't await
-    saveToRemoteCache(cacheKey, latestValue, expiryTimeInSec);
+    (async () => {
+      const result = await saveToRemoteCache(cacheKey, latestValue, expiryTimeInSec);
+      // if lock potentially expired before the write..
+      if (result !== false && estimatedLockExpiryTime <= Date.now()) {
+        // .. well I have potentially overwritten the remote cache anyway,
+        // so ask others to refetch and refresh their local caches
+        // the potential overwrite can't be avoided as redis doesn't have fenced locks
+        signalOthersProcessesToRefreshLocalCache(cacheKey);
+      }
+    })();
   } else if (!error) {
-    console.warn('Cannot cache undefined value for key', cacheKey);
+    console.warn('getOrInitCache: Cannot cache undefined value for key', cacheKey);
   }
+
 
   clearInterval(lockExtensionTimer);
   // async unlock. don't await
@@ -274,7 +298,12 @@ async function attemptCacheRegeneration(
   const lockExtensionTimer = setInterval(async () => {
     const now = Date.now();
     const timeElapsed = now - lastExendedTime;
-    lock = await lock.extend(timeElapsed);
+    try {
+      lock = await lock.extend(timeElapsed);
+      lastExendedTime = now;
+    } catch (err) {
+      console.warn('attemptCacheRegeneration: Lock couldn\'t be extended for key', cacheKey, ':', err.message);
+    }
     lastExendedTime = now;
   }, CACHE_LOCK_EXTENSION_TTL);
 
@@ -283,18 +312,18 @@ async function attemptCacheRegeneration(
   try {
     latestValue = await fetchLatestValue();
   } catch (err) {
-    error = new Error(`could not compute latest cache value for key ${cacheKey}`);
+    error = new Error(`attemptCacheRegeneration: could not compute latest cache value for key ${cacheKey}`);
   }
 
   if (!error) {
     if (latestValue !== undefined) {
       // when forcing regeneration, wait for save and unlock and then return.
       const res = await saveToRemoteCache(cacheKey, latestValue, expiryTimeInSec);
-      if (res === false) {
-        error = new Error('Could not save value to remote cache. So not going to save to local cache either');
-      } else {
+      if (res !== false) {
         saveToLocalCache(cacheKey, latestValue, expiryTimeInSec);
         signalOthersProcessesToRefreshLocalCache(cacheKey);
+      } else {
+        error = new Error('Could not save value to remote cache. So not going to save to local cache either');
       }
     } else {
       error = new Error(`Cannot cache undefined value for key ${cacheKey}`);
