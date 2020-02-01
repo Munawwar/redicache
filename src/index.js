@@ -22,6 +22,12 @@ let redisClient;
 let retryForeverLock;
 let tryOnceLock;
 
+// monotonic clock. i.e it always increases regardless of system time.
+function time() {
+  const [seconds, nanos] = process.hrtime();
+  return seconds * 1000 + Math.trunc(nanos / 1000000); // convert to milliseconds
+}
+
 async function refreshLocalCacheFromRemoteCache(cacheKey) {
   // if not found, check in remote cache
   const [val, ttlInSec] = await Promise.all([
@@ -56,22 +62,31 @@ function unlock(lock, lockKey) {
     .catch((err) => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
 }
 
-// FIXME: currently if redis is down, each process will call fetchLatestValue()
-// independently and parellely and could be prohibitively expensive.
-// In those cases, maybe returning the old cache value and serving potentially stale
-// value is better.
-// Or alternatively use a 3rd data store to mock the data or fetch stale data
-// - like a filesystem with stored mock/stale data. hmmmm....
+/*
+FIXME:
+if reds is down:
+several way to handle behavior on data:
+1. maybe not saving anything and returning/throwing Error (or undefined) is
+   better (for short lived states)
+2. maybe fetching fresh value all the time is ok
+3. maybe returning old cache value is better or returning some placeholder data is
+   fine (using data stored in a 3rd data store.. like filesystem)
+
+there is also case for/againt to retry when connection comes back up:
+1. refetch latest values once connection is back up and save that in redis
+2. don’t do anything (and wait for it to expire or something to trigger refresh)
+*/
 async function redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec) {
   let latestValue;
   try {
-    latestValue = await fetchLatestValue();
+    latestValue = await fetchLatestValue({ remoteCacheDown: true });
   } catch (err) {
     console.warn('getOrInitCache: could not compute latest cache value for', cacheKey, ':', err.message);
   }
-  if (latestValue !== undefined) {
+  if (latestValue !== undefined && !(latestValue instanceof Error)) {
     localCache.save(cacheKey, latestValue, expiryTimeInSec);
   }
+  // TODO: shedule a retry & save to remote cache job.
   return latestValue;
 }
 
@@ -122,10 +137,10 @@ async function getOrInitCache(
   // what happens if lock extension fails? I overwrite the cache anyway,
   // since the point of the lock was to avoid multiple calls to fetchLatestValue()
   // (which could be very expensive)
-  let lastExendedTime = Date.now();
+  let lastExendedTime = time();
   let estimatedLockExpiryTime = lastExendedTime + CACHE_LOCK_TTL;
   const lockExtensionTimer = setInterval(async () => {
-    const now = Date.now();
+    const now = time();
     const timeElapsed = now - lastExendedTime;
     try {
       estimatedLockExpiryTime += timeElapsed; // lock extension might take time, so increment first
@@ -163,7 +178,7 @@ async function getOrInitCache(
     (async () => {
       const result = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
       // if lock potentially expired before the write..
-      if (result !== false && estimatedLockExpiryTime <= Date.now()) {
+      if (result !== false && estimatedLockExpiryTime <= time()) {
         // .. well I have potentially overwritten the remote cache anyway,
         // so ask others to refetch and refresh their local caches
         // the potential overwrite can't be avoided as redis doesn't have fenced locks
@@ -211,9 +226,9 @@ async function attemptCacheRegeneration(
   // function fetchLatestValue() takes too long.
   // keep track of lastExtendedTime, since JS setInterval may not run
   // exactly at the set time due to other blocking scripts or GC pause etc.
-  let lastExendedTime = Date.now();
+  let lastExendedTime = time();
   const lockExtensionTimer = setInterval(async () => {
-    const now = Date.now();
+    const now = time();
     const timeElapsed = now - lastExendedTime;
     try {
       lock = await lock.extend(timeElapsed);
