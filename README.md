@@ -1,5 +1,5 @@
 # redicache
-Work in progress - Two level caching strategy - Redis + Local (in process memory) for storing important boot-time meta-data/dynamic configs - for node.js
+Work in progress - Two level caching strategy - Redis + Local (in process memory) - for storing important boot-time meta-data/dynamic configs - for node.js
 
 Caching works across any number of node.js processes regardless of architecture as long as they can connect to a common redis cluster (library uses redis pubsub and redlock).
 
