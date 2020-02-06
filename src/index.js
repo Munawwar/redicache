@@ -57,26 +57,6 @@ function signalOthersProcessesToRefreshLocalCache(cacheKey) {
 
 const getLockKey = (cacheKey) => `cachelock::${cacheKey}`;
 
-// reduce redis lock polling by having only one promise per process for a given cache key
-const lockPromiseCache = {};
-const waitForLock = (cacheKey, ttl) => {
-  const lockKey = getLockKey(cacheKey);
-  if (!lockPromiseCache[lockKey]) {
-    lockPromiseCache[lockKey] = (async () => {
-      let lock;
-      try {
-        lock = await retryForeverLock.lock(lockKey, ttl);
-        delete lockPromiseCache[lockKey];
-      } catch (err) {
-        delete lockPromiseCache[lockKey];
-        throw err;
-      }
-      return lock;
-    })();
-  }
-  return lockPromiseCache[lockKey];
-};
-
 function unlock(lock, lockKey) {
   return lock.unlock()
     .catch((err) => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
@@ -141,7 +121,7 @@ async function getOrInitCache(
   const lockKey = getLockKey(cacheKey);
   let lock;
   try {
-    lock = await waitForLock(lockKey, CACHE_LOCK_TTL);
+    lock = await retryForeverLock.lock(lockKey, CACHE_LOCK_TTL);
   } catch (err) {
     console.warn('getOrInitCache: Could not acquire cache lock for key', `${cacheKey}. Is redis down? :`, err.message);
     // redis is down.. so fall back to local cache only
@@ -225,11 +205,11 @@ async function attemptCacheRegeneration(
   if (!redisClient) {
     return new Error('cache library not initialized. you need to first call init() method with redisClient as parameter');
   }
+  const lockKey = getLockKey(cacheKey);
+  let lock;
 
   // for regeneration purpose, don't allow multiple parallel regeneration requests.
   // reject requests if already regenerating.
-  const lockKey = getLockKey(cacheKey);
-  let lock;
   try {
     lock = await tryOnceLock.lock(lockKey, CACHE_LOCK_TTL);
   } catch (err) {
