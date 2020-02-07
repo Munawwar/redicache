@@ -9,6 +9,7 @@ const bluebird = require('bluebird');
 
 const localCache = require('./localCache');
 const remoteCache = require('./remoteCache');
+const promiseCacher = require('./promiseCacher');
 
 // the default expiry time if expiry is not specified.
 const defaultExpiryInSec = 60 * 60; // 1 hour
@@ -86,7 +87,7 @@ async function redisDownCase(cacheKey, fetchLatestValue, expiryTimeInSec) {
   if (latestValue !== undefined && !(latestValue instanceof Error)) {
     localCache.save(cacheKey, latestValue, expiryTimeInSec);
   }
-  // TODO: shedule a retry & save to remote cache job.
+  // TODO: schedule a retry & save to remote cache job.
   return latestValue;
 }
 
@@ -276,10 +277,10 @@ const exportObject = {
   // why two methods?
   // one will wait till cache is initialized in the case where
   // multiple processes try to init cache simultaneously
-  getOrInitCache,
+  getOrInitCache: promiseCacher(getOrInitCache),
   // other one will only attempt once before giving up in the case
   // where multiple processes try to regenerate cache simultaneously
-  attemptCacheRegeneration,
+  attemptCacheRegeneration: promiseCacher(attemptCacheRegeneration),
 };
 
 exportObject.init = function init(_redisClient) {
@@ -334,6 +335,7 @@ exportObject.init = function init(_redisClient) {
       channel === 'cacheChannel'
       && message.command === 'refreshYourLocalCacheFromRemoteCache'
       && message.cacheKey
+      // TODO: if message was sent by same process, then need to ingore it.
     ) {
       refreshLocalCacheFromRemoteCache(message.cacheKey);
     }
