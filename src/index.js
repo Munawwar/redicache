@@ -15,7 +15,7 @@ const promiseCacher = require('./promiseCacher');
 const processId = 'x'.repeat(20).replace(/x/g, () => Math.trunc(Math.random() * 36).toString(36));
 
 // the default expiry time if expiry is not specified.
-const defaultExpiryInSec = 60 * 60; // 1 hour
+const defaultExpiryInSec = Infinity; // forever
 
 // lockTime has to be greater than the worst-case blocking duration..
 // like a super long GC pause or CPU intensive tight loop. 10 mins?
