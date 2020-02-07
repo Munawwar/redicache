@@ -11,6 +11,9 @@ const localCache = require('./localCache');
 const remoteCache = require('./remoteCache');
 const promiseCacher = require('./promiseCacher');
 
+// quick uuid generation
+const processId = 'x'.repeat(20).replace(/x/g, () => Math.trunc(Math.random() * 36).toString(36));
+
 // the default expiry time if expiry is not specified.
 const defaultExpiryInSec = 60 * 60; // 1 hour
 
@@ -52,6 +55,7 @@ function signalOthersProcessesToRefreshLocalCache(cacheKey) {
     JSON.stringify({
       command: 'refreshYourLocalCacheFromRemoteCache',
       cacheKey,
+      processId,
     }),
   );
 }
@@ -335,7 +339,8 @@ exportObject.init = function init(_redisClient) {
       channel === 'cacheChannel'
       && message.command === 'refreshYourLocalCacheFromRemoteCache'
       && message.cacheKey
-      // TODO: if message was sent by same process, then need to ingore it.
+      // if message was sent by the same process, then it can safetly be ignored.
+      && processId !== message.processId
     ) {
       refreshLocalCacheFromRemoteCache(message.cacheKey);
     }
