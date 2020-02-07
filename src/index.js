@@ -23,6 +23,7 @@ const CACHE_LOCK_TTL = 10 * 60 * 1000; // 10 mins
 const CACHE_LOCK_EXTENSION_TTL = 30 * 1000; // 30 secs
 
 let redisClient;
+let subscriberRedisClient;
 let retryForeverLock;
 let tryOnceLock;
 
@@ -284,14 +285,18 @@ const exportObject = {
   getOrInitCache: promiseCacher(getOrInitCache),
   // other one will only attempt once before giving up in the case
   // where multiple processes try to regenerate cache simultaneously
-  attemptCacheRegeneration: promiseCacher(attemptCacheRegeneration),
+  attemptCacheRegeneration,
 };
 
-exportObject.init = function init(_redisClient) {
+exportObject.init = function init(_redisClient, _subscriberRedisClient) {
   if (redisClient) {
     return new Error('Cannot initialize twice.');
   }
+  if (!_redisClient || !_subscriberRedisClient) {
+    return new Error('redicache needs two redis clients for initialization. One for cache+publish, and the other for subscribe. This is a limitation of redis');
+  }
   redisClient = _redisClient;
+  subscriberRedisClient = _subscriberRedisClient;
   remoteCache.init(redisClient);
   bluebird.promisifyAll(Object.getPrototypeOf(redisClient));
 
@@ -324,7 +329,7 @@ exportObject.init = function init(_redisClient) {
   );
 
   // listen to commands from other processes like moments when L1 cache is signalled to be stale
-  redisClient.on('message', (channel, rawMessage) => {
+  subscriberRedisClient.on('message', (channel, rawMessage) => {
     let message;
     try {
       message = JSON.parse(rawMessage);
@@ -345,7 +350,7 @@ exportObject.init = function init(_redisClient) {
       refreshLocalCacheFromRemoteCache(message.cacheKey);
     }
   });
-  redisClient.subscribe('cacheChannel');
+  subscriberRedisClient.subscribe('cacheChannel');
   return exportObject;
 };
 

@@ -1,5 +1,5 @@
 # redicache
-Work in progress - Two level caching strategy - Redis + Local (in process memory) - for storing important boot-time meta-data/dynamic configs - for node.js
+Two level caching strategy - Redis + Local (in process memory) - for storing important boot-time meta-data/dynamic configs - for node.js
 
 Caching works across any number of node.js processes regardless of architecture as long as they can connect to a common redis cluster (library uses redis pubsub and redlock).
 
@@ -14,11 +14,10 @@ const redicache = require('redicache');
 
 // create redis client. please read 'redis' npm package's documentation for this.
 const redis = require('redis');
-const redisClient = redis.createClient({
-  // ...
-});
+const redisClient = redis.createClient({ /* ... */ });
+const subscriberRedisClient = redis.createClient({ /* ... */ });
 
-redicache.init(redisClient);
+redicache.init(redisClient, subscriberRedisClient);
 // redicache is a singleton. you can't initialize again
 
 const fetchHomePage = async () => {
