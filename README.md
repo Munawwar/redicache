@@ -60,4 +60,15 @@ redicache's primary design intention is for storing boot time configs/meta data 
 
 2. Redis (and redlock) doesn't have fencing tokens. So potentially a process can overwrite the remote cache with an older value if write-lock expires while computing the new value to be saved. If that is a problem for your use-case then don't use this lib (and redis for locks). The approach isn't bullet-proof, but is of best effort. In many cases, this is an acceptable trade-off.
 
-3. Currently if redis is detected to be down, then library will fetch latest value and save in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
+3. Currently if redis is detected to be down, then library will fetch latest value and save it in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
+
+4. Before requesting for fresh value for caching, redicache acquires a write-lock for the cache key on redis. If your fetch function never completes (or doesn't resolve promise) and runs indefinately then write-lock will never get released (Turing halting problem.. which has no solution).
+
+## Design Considerations
+
+redicache is built with certain assumptions in mind:
+
+1. that it is super expensive operation to request for fresh value to be cached. So redicache tries to minmize requests for fresh value, across all processes in the system. Hence you see the usage of distributed locks to prevent two processes/requests from requesting for fresh value (unless redis lock service is down).
+
+2. the cached values are important for the functioning of your server. Therefore at no point should redicache delete a remote cache entry first and then request for fresh value.. this could bring down your server. Redicache requests fresh data, and then overwrites the exisitng cached value. This is a more resilient/robust approach.
+
