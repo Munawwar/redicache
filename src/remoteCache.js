@@ -4,7 +4,7 @@ let redisClient;
 async function fetchFromRemoteCache(cacheKey) {
   let val;
   try {
-    val = redisClient.getAsync(cacheKey);
+    val = await redisClient.getAsync(cacheKey);
   } catch (err) {
     console.warn('Error while fetching value from remote cache, for key', cacheKey, ':', err.message);
   }
@@ -21,7 +21,7 @@ async function fetchFromRemoteCache(cacheKey) {
 async function fetchTTLFromRemoteCache(cacheKey) {
   let val;
   try {
-    val = redisClient.ttlAsync(cacheKey);
+    val = await redisClient.ttlAsync(cacheKey);
   } catch (err) {
     console.warn('Error while fetching value from remote cache, for key', cacheKey, ':', err.message);
   }

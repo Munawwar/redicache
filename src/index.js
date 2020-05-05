@@ -286,6 +286,9 @@ const exportObject = {
   // other one will only attempt once before giving up in the case
   // where multiple processes try to regenerate cache simultaneously
   attemptCacheRegeneration,
+
+  // used internally for tests
+  _getOrInitCache: getOrInitCache,
 };
 
 exportObject.init = function init(_redisClient, _subscriberRedisClient) {
