@@ -9,7 +9,12 @@ const subscriberRedisClient = redis.createClient({});
 
 redicache.init(redisClient, subscriberRedisClient);
 
-const fetchHomePage = async () => { console.log('fetching...'); await bb.delay(5000); return { life: 42 }; };
+const fetchHomePage = async () => {
+  console.log('fetching...');
+  await bb.delay(2000);
+  return { life: 42 };
+};
+
 const cacheKey = 'cms::homepage'; // good practice to namespace it, since redis is global
 const cacheExpiryTimeInSeconds = 10;
 (async () => {

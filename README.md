@@ -21,8 +21,7 @@ redicache.init(redisClient, subscriberRedisClient);
 // redicache is a singleton. you can't initialize again
 
 const fetchHomePage = async () => {
-  // code to fetch CMS home page if it is not in cache already
-  // and then return it.
+  // code to fetch CMS home page..
 
   // note that if you return nothing (undefined), then library will not
   // cache it. you need to send back a non-undefined value for caching.

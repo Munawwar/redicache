@@ -4,15 +4,16 @@
 // Level 1 - in process memory
 // Level 2 - redis
 
-const Redlock = require('redlock');
-const bluebird = require('bluebird');
+const processId = require('./processId');
+const localCache = require('./cache/localCache');
+const remoteCache = require('./cache/remoteCache');
+const promiseCacher = require('./utils/promiseCacher');
+const refreshLocalCacheForKey = require('./cache/refreshLocalCacheForKey');
+const clients = require('./clients');
 
-const localCache = require('./localCache');
-const remoteCache = require('./remoteCache');
-const promiseCacher = require('./promiseCacher');
-
-// quick uuid generation
-const processId = 'x'.repeat(20).replace(/x/g, () => Math.trunc(Math.random() * 36).toString(36));
+const unlock = require('./utils/unlock');
+const getLockKey = require('./utils/getLockKey');
+const getTimeNow = require('./utils/getTimeNow');
 
 // the default expiry time if expiry is not specified.
 const defaultExpiryInSec = Infinity; // forever
@@ -22,31 +23,8 @@ const defaultExpiryInSec = Infinity; // forever
 const CACHE_LOCK_TTL = 10 * 60 * 1000; // 10 mins
 const CACHE_LOCK_EXTENSION_TTL = 30 * 1000; // 30 secs
 
-let redisClient;
-let subscriberRedisClient;
-let retryForeverLock;
-let tryOnceLock;
-
-// monotonic clock. i.e it always increases regardless of system time.
-function time() {
-  const [seconds, nanos] = process.hrtime();
-  return seconds * 1000 + Math.trunc(nanos / 1000000); // convert to milliseconds
-}
-
-async function refreshLocalCacheFromRemoteCache(cacheKey) {
-  // if not found, check in remote cache
-  const [val, ttlInSec] = await Promise.all([
-    remoteCache.fetch(cacheKey),
-    remoteCache.fetchTTL(cacheKey),
-  ]);
-  if (val !== undefined && ttlInSec) {
-    localCache.save(cacheKey, val, ttlInSec);
-    return val;
-  }
-  return undefined;
-}
-
 function signalOthersProcessesToRefreshLocalCache(cacheKey) {
+  const { redisClient } = clients.getAll();
   // tell other processes to that their L1 cache could be stale
   // why could be? because redis pub-sub doesn't guarentee receiver
   // to receive messages exactly as order of messages sent.
@@ -61,12 +39,6 @@ function signalOthersProcessesToRefreshLocalCache(cacheKey) {
   );
 }
 
-const getLockKey = (cacheKey) => `cachelock::${cacheKey}`;
-
-function unlock(lock, lockKey) {
-  return lock.unlock()
-    .catch((err) => console.warn('Could not release redis cache lock', lockKey, ':', err.message));
-}
 
 /*
 FIXME:
@@ -105,6 +77,10 @@ async function getOrInitCache(
   fetchLatestValue,
   expiryTimeInSec = defaultExpiryInSec,
 ) {
+  const {
+    redisClient,
+    retryForeverLock,
+  } = clients.getAll();
   if (!redisClient) {
     return new Error('cache library not initialized. you need to first call init() method with redisClient as parameter');
   }
@@ -115,7 +91,7 @@ async function getOrInitCache(
   }
 
   // if not found, check in remote cache
-  val = await refreshLocalCacheFromRemoteCache(cacheKey);
+  val = await refreshLocalCacheForKey(cacheKey);
   if (val !== undefined) {
     return val;
   }
@@ -143,10 +119,10 @@ async function getOrInitCache(
   // what happens if lock extension fails? I overwrite the cache anyway,
   // since the point of the lock was to avoid multiple calls to fetchLatestValue()
   // (which could be very expensive)
-  let lastExendedTime = time();
+  let lastExendedTime = getTimeNow();
   let estimatedLockExpiryTime = lastExendedTime + CACHE_LOCK_TTL;
   const lockExtensionTimer = setInterval(async () => {
-    const now = time();
+    const now = getTimeNow();
     const timeElapsed = now - lastExendedTime;
     try {
       estimatedLockExpiryTime += timeElapsed; // lock extension might take time, so increment first
@@ -161,7 +137,7 @@ async function getOrInitCache(
   // it is possible that this one process has been waiting very long to acquire
   // lock... by which time another process already updated remote cache.
   // so to avoid refetching latest value, we can first check for cache value again.
-  val = await refreshLocalCacheFromRemoteCache(cacheKey);
+  val = await refreshLocalCacheForKey(cacheKey);
   if (val !== undefined) {
     clearInterval(lockExtensionTimer);
     // async unlock. don't await
@@ -184,7 +160,7 @@ async function getOrInitCache(
     (async () => {
       const result = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
       // if lock potentially expired before the write..
-      if (result !== false && estimatedLockExpiryTime <= time()) {
+      if (result !== false && estimatedLockExpiryTime <= getTimeNow()) {
         // .. well I have potentially overwritten the remote cache anyway,
         // so ask others to refetch and refresh their local caches
         // the potential overwrite can't be avoided as redis doesn't have fenced locks
@@ -208,6 +184,7 @@ async function attemptCacheRegeneration(
   fetchLatestValue,
   expiryTimeInSec = defaultExpiryInSec,
 ) {
+  const { redisClient, tryOnceLock } = clients.getAll();
   if (!redisClient) {
     return new Error('cache library not initialized. you need to first call init() method with redisClient as parameter');
   }
@@ -232,9 +209,9 @@ async function attemptCacheRegeneration(
   // function fetchLatestValue() takes too long.
   // keep track of lastExtendedTime, since JS setInterval may not run
   // exactly at the set time due to other blocking scripts or GC pause etc.
-  let lastExendedTime = time();
+  let lastExendedTime = getTimeNow();
   const lockExtensionTimer = setInterval(async () => {
-    const now = time();
+    const now = getTimeNow();
     const timeElapsed = now - lastExendedTime;
     try {
       lock = await lock.extend(timeElapsed);
@@ -278,7 +255,7 @@ async function attemptCacheRegeneration(
   return latestValue;
 }
 
-const exportObject = {
+module.exports = {
   // why two methods?
   // one will wait till cache is initialized in the case where
   // multiple processes try to init cache simultaneously
@@ -286,75 +263,8 @@ const exportObject = {
   // other one will only attempt once before giving up in the case
   // where multiple processes try to regenerate cache simultaneously
   attemptCacheRegeneration,
+  init: clients.init,
 
   // used internally for tests
   _getOrInitCache: getOrInitCache,
 };
-
-exportObject.init = function init(_redisClient, _subscriberRedisClient) {
-  if (redisClient) {
-    return new Error('Cannot initialize twice.');
-  }
-  if (!_redisClient || !_subscriberRedisClient) {
-    return new Error('redicache needs two redis clients for initialization. One for cache+publish, and the other for subscribe. This is a limitation of redis');
-  }
-  redisClient = _redisClient;
-  subscriberRedisClient = _subscriberRedisClient;
-  remoteCache.init(redisClient);
-  bluebird.promisifyAll(Object.getPrototypeOf(redisClient));
-
-  retryForeverLock = new Redlock(
-    // you should have one client for each independent redis node
-    // or cluster
-    [redisClient],
-    {
-      driftFactor: 0.01, // time in ms
-      // the max number of times Redlock will attempt
-      // to lock a resource before erroring
-      retryCount: -1, // retry forever
-      retryDelay: 400, // time in ms
-      retryJitter: 400, // time in ms
-    },
-  );
-
-  tryOnceLock = new Redlock(
-    // you should have one client for each independent redis node
-    // or cluster
-    [redisClient],
-    {
-      driftFactor: 0.01, // time in ms
-      // the max number of times Redlock will attempt
-      // to lock a resource before erroring
-      retryCount: 0, // retry forever
-      retryDelay: 400, // time in ms
-      retryJitter: 400, // time in ms
-    },
-  );
-
-  // listen to commands from other processes like moments when L1 cache is signalled to be stale
-  subscriberRedisClient.on('message', (channel, rawMessage) => {
-    let message;
-    try {
-      message = JSON.parse(rawMessage);
-    } catch (err) {
-      // do nothing
-    }
-    if (!message) {
-      return;
-    }
-
-    if (
-      channel === 'cacheChannel'
-      && message.command === 'refreshYourLocalCacheFromRemoteCache'
-      && message.cacheKey
-      // if message was sent by the same process, then it can safetly be ignored.
-      && processId !== message.processId
-    ) {
-      refreshLocalCacheFromRemoteCache(message.cacheKey);
-    }
-  });
-  subscriberRedisClient.subscribe('cacheChannel');
-  return exportObject;
-};
-
-module.exports = exportObject;
