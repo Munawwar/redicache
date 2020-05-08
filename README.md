@@ -59,7 +59,7 @@ redicache's primary design intention is for storing boot time configs/meta data 
 
 2. Currently if redis is detected to be down, then library will fetch latest value and save it in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
 
-Also once redis comes back up, processes could have ended up with different values in their local cache.
+    Also once redis comes back up, processes could have ended up with different values in their local cache.
 
 3. Before requesting for fresh value for caching, redicache acquires a write-lock for the cache key on redis. If your fetch function never completes (or doesn't resolve promise) and runs indefinately then write-lock will never get released (Turing halting problem.. which has no solution).
 
