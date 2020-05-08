@@ -57,11 +57,11 @@ const newValueOrError = await redicache.attemptCacheRegeneration(
 1. There is no memory cap/max limit for local cache. If you store too much in the cache (which is in-process memory), your process/node.js could crash. This is not exactly a limitation, but something to be aware of.
 redicache's primary design intention is for storing boot time configs/meta data which I assume is small (yet critical to run your app), and not built to cache high volumes of user data or the like.
 
-2. Redis (and redlock) doesn't have fencing tokens. So potentially a process can overwrite the remote cache with an older value if write-lock expires while computing the new value to be saved. If that is a problem for your use-case then don't use this lib (and redis for locks). The approach isn't bullet-proof, but is of best effort. In many cases, this is an acceptable trade-off.
+2. Currently if redis is detected to be down, then library will fetch latest value and save it in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
 
-3. Currently if redis is detected to be down, then library will fetch latest value and save it in local cache. Which means multiple processes could potentially request for fresh values parallelly. If this is too expensive to deal with, then currently there is no config to change this behavior. In future, I might add a way to configure to return stale value instead of fetching fresh.
+Also once redis comes back up, processes could have ended up with different values in their local cache.
 
-4. Before requesting for fresh value for caching, redicache acquires a write-lock for the cache key on redis. If your fetch function never completes (or doesn't resolve promise) and runs indefinately then write-lock will never get released (Turing halting problem.. which has no solution).
+3. Before requesting for fresh value for caching, redicache acquires a write-lock for the cache key on redis. If your fetch function never completes (or doesn't resolve promise) and runs indefinately then write-lock will never get released (Turing halting problem.. which has no solution).
 
 ## Design Considerations
 

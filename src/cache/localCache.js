@@ -14,15 +14,15 @@ function fetchFromLocalCache(cacheKey) {
 function saveToLocalCache(cacheKey, value, expiryTimeInSec) {
   if (value === undefined) {
     console.warn('Cannot save undefined value to local cache for key', cacheKey);
-    return false;
+    return { success: false };
   }
   if (expiryTimeInSec === undefined) {
     console.warn('Cannot save undefined expiry time to local cache for key', cacheKey);
-    return false;
+    return { success: false };
   }
   if (expiryTimeInSec < 0) {
     console.warn('Expiry time cannot be negative for local cache key', cacheKey);
-    return false;
+    return { success: false };
   }
   clearTimeout((inMemCache[cacheKey] || {}).timer);
   inMemCache[cacheKey] = {
@@ -33,7 +33,7 @@ function saveToLocalCache(cacheKey, value, expiryTimeInSec) {
       }, expiryTimeInSec * 1000)
       : null,
   };
-  return true;
+  return { success: true };
 }
 
 module.exports = {

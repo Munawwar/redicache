@@ -65,7 +65,7 @@ function init(_redisClient, _subscriberRedisClient) {
 
     if (
       channel === 'cacheChannel'
-      && message.command === 'refreshYourLocalCacheFromRemoteCache'
+      && message.command === 'refreshYourLocalCacheForKey'
       && message.cacheKey
       // if message was sent by the same process, then it can safetly be ignored.
       && processId !== message.processId

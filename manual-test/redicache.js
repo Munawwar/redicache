@@ -31,6 +31,9 @@ const cacheExpiryTimeInSeconds = 10;
     ),
   ]);
   console.log(results);
+
+  subscriberRedisClient.quit();
+  redisClient.quit();
 })();
 
 // output expected

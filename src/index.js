@@ -32,7 +32,7 @@ function signalOthersProcessesToRefreshLocalCache(cacheKey) {
   redisClient.publish(
     'cacheChannel',
     JSON.stringify({
-      command: 'refreshYourLocalCacheFromRemoteCache',
+      command: 'refreshYourLocalCacheForKey',
       cacheKey,
       processId,
     }),
@@ -120,16 +120,13 @@ async function getOrInitCache(
   // since the point of the lock was to avoid multiple calls to fetchLatestValue()
   // (which could be very expensive)
   let lastExendedTime = getTimeNow();
-  let estimatedLockExpiryTime = lastExendedTime + CACHE_LOCK_TTL;
   const lockExtensionTimer = setInterval(async () => {
     const now = getTimeNow();
     const timeElapsed = now - lastExendedTime;
     try {
-      estimatedLockExpiryTime += timeElapsed; // lock extension might take time, so increment first
       lock = await lock.extend(timeElapsed);
       lastExendedTime = now;
     } catch (err) {
-      estimatedLockExpiryTime -= timeElapsed;
       console.warn('getOrInitCache: Lock couldn\'t be extended for key', cacheKey, ':', err.message);
     }
   }, CACHE_LOCK_EXTENSION_TTL);
@@ -155,18 +152,12 @@ async function getOrInitCache(
   }
 
   if (latestValue !== undefined) {
+    const result = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
+    // if lock potentially expired before the write, the save could fail.
+    if (!result.success && result.currentValue !== undefined) {
+      latestValue = result.currentValue;
+    }
     localCache.save(cacheKey, latestValue, expiryTimeInSec);
-    // asyncly save to remote cache and release lock in normal cases. don't await
-    (async () => {
-      const result = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
-      // if lock potentially expired before the write..
-      if (result !== false && estimatedLockExpiryTime <= getTimeNow()) {
-        // .. well I have potentially overwritten the remote cache anyway,
-        // so ask others to refetch and refresh their local caches
-        // the potential overwrite can't be avoided as redis doesn't have fenced locks
-        signalOthersProcessesToRefreshLocalCache(cacheKey);
-      }
-    })();
   } else if (!error) {
     console.warn('getOrInitCache: Cannot cache undefined value for key', cacheKey);
   }
@@ -233,8 +224,8 @@ async function attemptCacheRegeneration(
   if (!error) {
     if (latestValue !== undefined) {
       // when forcing regeneration, wait for save and unlock and then return.
-      const res = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec);
-      if (res !== false) {
+      const res = await remoteCache.save(cacheKey, latestValue, expiryTimeInSec, true);
+      if (res.success) {
         localCache.save(cacheKey, latestValue, expiryTimeInSec);
         signalOthersProcessesToRefreshLocalCache(cacheKey);
       } else {
