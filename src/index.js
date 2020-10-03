@@ -246,6 +246,11 @@ async function attemptCacheRegeneration(
   return latestValue;
 }
 
+function quit(callback) {
+  clients.quit(callback);
+  localCache.quit();
+}
+
 module.exports = {
   // why two methods?
   // one will wait till cache is initialized in the case where
@@ -258,4 +263,5 @@ module.exports = {
 
   // used internally for tests
   _getOrInitCache: getOrInitCache,
+  quit,
 };

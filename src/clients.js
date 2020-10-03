@@ -77,6 +77,13 @@ function init(_redisClient, _subscriberRedisClient) {
   return true;
 }
 
+function quit(callback) {
+  remoteCache.quit(callback);
+  if (subscriberRedisClient) {
+    subscriberRedisClient.quit(callback);
+  }
+}
+
 module.exports = {
   getAll() {
     return {
@@ -87,4 +94,5 @@ module.exports = {
     };
   },
   init,
+  quit,
 };

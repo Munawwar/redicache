@@ -36,7 +36,15 @@ function saveToLocalCache(cacheKey, value, expiryTimeInSec) {
   return { success: true };
 }
 
+// setTimeouts wont let node.js exit. so quit function is required
+function quit() {
+  Object
+    .values(inMemCache)
+    .forEach(({ time }) => clearTimeout(time));
+}
+
 module.exports = {
   fetch: fetchFromLocalCache,
   save: saveToLocalCache,
+  quit,
 };

@@ -116,4 +116,9 @@ module.exports = {
   fetch: fetchFromRemoteCache,
   fetchTTL: fetchTTLFromRemoteCache,
   save: saveToRemoteCache,
+  quit: (callback) => {
+    if (redisClient) {
+      redisClient.quit(callback);
+    }
+  },
 };
